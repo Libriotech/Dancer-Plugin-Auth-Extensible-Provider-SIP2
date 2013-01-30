@@ -1,5 +1,6 @@
 package Dancer::Plugin::Auth::Extensible::Provider::SIP2;
 
+use base 'Dancer::Plugin::Auth::Extensible::Provider::Base';
 use Modern::Perl;
 
 =head1 NAME
@@ -33,18 +34,46 @@ if you don't export anything, such as for a purely object-oriented module.
 
 =head1 SUBROUTINES/METHODS
 
-=head2 function1
+=head2 authenticate_user
+
+Given the username and password entered by the user, return true if they are
+authenticated, or false if not.
 
 =cut
 
-sub function1 {
+sub authenticate_user {
+    my ($self, $username, $password) = @_;
+    return 1;
 }
 
-=head2 function2
+=head2 get_user_details
+
+Given a username, return details about the user. 
+
+Details should be returned as a hashref.
 
 =cut
 
-sub function2 {
+sub get_user_details {
+    my ($self, $username) = @_;
+    
+    my $user = {
+        username => 'qwerty', 
+        name     => 'Sip User',
+    };
+    
+    return $user;
+}
+
+=head1 get_user_roles
+
+Given a username, return a list of roles that user has.
+
+=cut
+
+sub get_user_roles {
+    my ($self, $username) = @_;
+    return [ qw(user) ];
 }
 
 =head1 AUTHOR
