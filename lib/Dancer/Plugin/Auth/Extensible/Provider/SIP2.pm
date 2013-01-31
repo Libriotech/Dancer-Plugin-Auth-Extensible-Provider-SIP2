@@ -1,6 +1,9 @@
 package Dancer::Plugin::Auth::Extensible::Provider::SIP2;
 
 use base 'Dancer::Plugin::Auth::Extensible::Provider::Base';
+use Dancer qw(:syntax);
+use SIP2::SC;
+use DateTime;
 use Modern::Perl;
 
 =head1 NAME
@@ -43,7 +46,95 @@ authenticated, or false if not.
 
 sub authenticate_user {
     my ($self, $username, $password) = @_;
-    return 1;
+    
+    my $settings = $self->realm_settings;
+    debug "*** Authenticating against: " . $settings->{host};
+    my $sc = SIP2::SC->new( $settings->{host} );
+    
+    # Attempt to log in to the SIP2 server
+    # $sc->message("9300CN$user|CO$password|");
+    
+    ## Send the Patron Information message
+    
+    # Code for the message we want to send. 63 = Patron Information
+    my $code = '63'; 
+    # Language - 3 char, fixed lenght, required
+    my $lang = '   '; 
+    # Transaction date - 18 char, fixed length, required. Format: YYYYMMDDZZZZHHMMSS
+    my $dt = DateTime->now;
+    my $date = $dt->strftime("%Y%m%d    %H%M%S"); 
+    # Summary - 10 char, fixed lenght, required
+    my $summary = '          ';
+    # Institution ID - variable length, required field
+    my $inst = 'AO|';
+    # Patron identifier - variable length, required field
+    my $patron = "AA$username|";
+    # Terminal password - variable length, required field
+    my $term = "AC|";
+    # Patron password - variable length, required field
+    my $pass = "AD$password|";
+    
+    my $msg = $code . $lang . $date . $summary . $inst . $patron . $term . $pass;
+    debug "*** Message being sent: " . $msg;
+    
+    my $record = $sc->message( $msg );
+    
+    # Borrowed from Koha's C4::SIP::Sip
+    $record =~ s/^\s*[^A-z0-9]+//s; # Every line must start with a "real" character.  Not whitespace, control chars, etc. 
+    $record =~ s/[^A-z0-9]+$//s;    # Same for the end.  Note this catches the problem some clients have sending empty fields at the end, like |||
+    $record =~ s/\015?\012//g;      # Extra line breaks must die
+    $record =~ s/\015?\012//s;      # Extra line breaks must die
+    $record =~ s/\015*\012*$//s;    # treat as one line to include the extra linebreaks we are trying to remove!
+    
+    debug "*** Response from SIP2 server:" . $record;
+    
+    ## Parse the Patron Information Response we received from the server
+    
+    # BL - Check for a valid patron. BLY = valid, BLN = not valid
+    if ( $record =~ m/\|BLN/ ) {
+    
+        debug "*** Authentication failed: not a valid patron";
+        return;
+    
+    } elsif ( $record =~ m/\|BLY/ ) {
+    
+        # CQ - Valid patron password. CQY = valid, CQN = not valid
+        if ( $record =~ m/\|CQN/ ) {
+        
+            debug "*** Authentication failed: not a valid patron password";
+            return;
+        
+        } elsif ( $record =~ m/\|CQY/ ) {
+    
+            my $user = { username => $username };
+            
+            ## Pick out interesting pieces from the record
+            
+            # Email
+            $record =~ m/\|BE(.*?)\|/;
+            $user->{email} = $1;
+
+            # Name
+            $record =~ m/\|AE(.*?)\|/;
+            $user->{name} = $1;
+           
+            # Save the interesting pieces for later
+            $self->{user} = $user;    
+        
+            return 1;
+            
+        } else {
+        
+            die "Response from SIP2 does not contain neither CQY nor CQN. This should not happen!";
+        
+        }
+            
+    } else {
+    
+        die "Response from SIP2 does not contain neither BLY nor BLN. This should not happen!";
+    
+    }
+    
 }
 
 =head2 get_user_details
@@ -56,13 +147,14 @@ Details should be returned as a hashref.
 
 sub get_user_details {
     my ($self, $username) = @_;
+    if ( $self->{user} ) { 
+        debug "*** Found user: " . $self->{user}->{username};
+        return $self->{user};
+    } else {
+        debug "*** User not found: $username";
+        return;
+    }
     
-    my $user = {
-        username => 'qwerty', 
-        name     => 'Sip User',
-    };
-    
-    return $user;
 }
 
 =head1 get_user_roles
@@ -72,8 +164,7 @@ Given a username, return a list of roles that user has.
 =cut
 
 sub get_user_roles {
-    my ($self, $username) = @_;
-    return [ qw(user) ];
+    return;
 }
 
 =head1 AUTHOR
