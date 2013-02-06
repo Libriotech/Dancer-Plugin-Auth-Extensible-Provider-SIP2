@@ -45,14 +45,18 @@ authenticated, or false if not.
 =cut
 
 sub authenticate_user {
-    my ($self, $username, $password) = @_;
+    my ($self, $patron_username, $paron_password) = @_;
     
     my $settings = $self->realm_settings;
     debug "*** Authenticating against: " . $settings->{host};
     my $sc = SIP2::SC->new( $settings->{host} );
     
     # Attempt to log in to the SIP2 server
-    # $sc->message("9300CN$user|CO$password|");
+    my $username = $settings->{username};
+    my $password = $settings->{password};
+    my $login_reply = $sc->message("9300CN$username|CO$password|");
+    $login_reply = _clean_sip2_reply( $login_reply );
+    debug "*** Login: " . $login_reply;
     
     ## Send the Patron Information message
     
@@ -68,24 +72,17 @@ sub authenticate_user {
     # Institution ID - variable length, required field
     my $inst = 'AO|';
     # Patron identifier - variable length, required field
-    my $patron = "AA$username|";
+    my $patron = "AA$patron_username|";
     # Terminal password - variable length, required field
     my $term = "AC|";
     # Patron password - variable length, required field
-    my $pass = "AD$password|";
+    my $pass = "AD$patron_password|";
     
     my $msg = $code . $lang . $date . $summary . $inst . $patron . $term . $pass;
     debug "*** Message being sent: " . $msg;
     
     my $record = $sc->message( $msg );
-    
-    # Borrowed from Koha's C4::SIP::Sip
-    $record =~ s/^\s*[^A-z0-9]+//s; # Every line must start with a "real" character.  Not whitespace, control chars, etc. 
-    $record =~ s/[^A-z0-9]+$//s;    # Same for the end.  Note this catches the problem some clients have sending empty fields at the end, like |||
-    $record =~ s/\015?\012//g;      # Extra line breaks must die
-    $record =~ s/\015?\012//s;      # Extra line breaks must die
-    $record =~ s/\015*\012*$//s;    # treat as one line to include the extra linebreaks we are trying to remove!
-    
+    $record = _clean_sip2_reply( $record );
     debug "*** Response from SIP2 server:" . $record;
     
     ## Parse the Patron Information Response we received from the server
@@ -157,7 +154,7 @@ sub get_user_details {
     
 }
 
-=head1 get_user_roles
+=head2 get_user_roles
 
 Given a username, return a list of roles that user has.
 
@@ -165,6 +162,28 @@ Given a username, return a list of roles that user has.
 
 sub get_user_roles {
     return;
+}
+
+=head2 _clean_sip2_reply
+
+Replies from SIP2 can contain weird chars that make them not show up in the logs.
+This subroutine takes a raw SIP2 reply and tries to remove any offending chars. 
+
+=cut
+
+sub _clean_sip2_reply {
+
+    my ( $s ) = @_;
+
+    # Borrowed from Koha's C4::SIP::Sip
+    $s =~ s/^\s*[^A-z0-9]+//s; # Every line must start with a "real" character.  Not whitespace, control chars, etc. 
+    $s =~ s/[^A-z0-9]+$//s;    # Same for the end.  Note this catches the problem some clients have sending empty fields at the end, like |||
+    $s =~ s/\015?\012//g;      # Extra line breaks must die
+    $s =~ s/\015?\012//s;      # Extra line breaks must die
+    $s =~ s/\015*\012*$//s;    # treat as one line to include the extra linebreaks we are trying to remove!
+    
+    return $s;
+
 }
 
 =head1 AUTHOR
