@@ -58,6 +58,50 @@ sub authenticate_user {
     $login_reply = _clean_sip2_reply( $login_reply );
     debug "*** Login: " . $login_reply;
     
+    ## Send the Patron Status Request
+    
+    # Code for the message we want to send. 23 = Patron Status Request
+    my $code = '23'; 
+    # Language - 3 char, fixed lenght, required
+    my $lang = '   '; 
+    # Transaction date - 18 char, fixed length, required. Format: YYYYMMDDZZZZHHMMSS
+    my $dt = DateTime->now;
+    my $date = $dt->strftime("%Y%m%d    %H%M%S"); 
+    # Institution ID - variable length, required field
+    my $inst = 'AO|';
+    # Patron identifier - variable length, required field
+    my $patron = "AA$patron_username|";
+    # Terminal password - variable length, required field
+    my $term = "AC$password|";
+    # Patron password - variable length, required field
+    my $pass = "AD$patron_password|";
+    
+    my $msg = $code . $lang . $date . $inst . $patron . $term . $pass;
+    debug "*** Message being sent: " . $msg;
+    
+    my $record = $sc->message( $msg );
+    $record = _clean_sip2_reply( $record );
+    debug "*** Response from SIP2 server:" . $record;
+    
+    return _sip2_indicates_valid_user( $record );    
+    
+}
+
+=head2 get_user_details
+
+Given a username, return details about the user. 
+
+Details should be returned as a hashref.
+
+=cut
+
+sub get_user_details {
+    my ($self, $patron_username) = @_;
+
+    my $settings = $self->realm_settings;
+    debug "*** Authenticating against: " . $settings->{host};
+    my $sc = SIP2::SC->new( $settings->{host} );
+
     ## Send the Patron Information message
     
     # Code for the message we want to send. 63 = Patron Information
@@ -76,7 +120,7 @@ sub authenticate_user {
     # Terminal password - variable length, required field
     my $term = "AC|";
     # Patron password - variable length, required field
-    my $pass = "AD$patron_password|";
+    my $pass = "AD|";
     
     my $msg = $code . $lang . $date . $summary . $inst . $patron . $term . $pass;
     debug "*** Message being sent: " . $msg;
@@ -95,61 +139,22 @@ sub authenticate_user {
     
     } elsif ( $record =~ m/\|BLY/ ) {
     
-        # CQ - Valid patron password. CQY = valid, CQN = not valid
-        if ( $record =~ m/\|CQN/ ) {
+        my $user = {};
         
-            debug "*** Authentication failed: not a valid patron password";
-            return;
-        
-        } elsif ( $record =~ m/\|CQY/ ) {
-    
-            my $user = { username => $patron_username };
-            
-            ## Pick out interesting pieces from the record
-            
-            # Email
-            $record =~ m/\|BE(.*?)\|/;
-            $user->{email} = $1;
+        # Email
+        $record =~ m/\|BE(.*?)\|/;
+        $user->{email} = $1;
 
-            # Name
-            $record =~ m/\|AE(.*?)\|/;
-            $user->{name} = $1;
-           
-            # Save the interesting pieces for later
-            $self->{user} = $user;    
-        
-            return 1;
-            
-        } else {
-        
-            die "Response from SIP2 does not contain neither CQY nor CQN. This should not happen!";
-        
-        }
+        # Name
+        $record =~ m/\|AE(.*?)\|/;
+        $user->{name} = $1;
+       
+        return $user;
             
     } else {
     
         die "Response from SIP2 does not contain neither BLY nor BLN. This should not happen!";
     
-    }
-    
-}
-
-=head2 get_user_details
-
-Given a username, return details about the user. 
-
-Details should be returned as a hashref.
-
-=cut
-
-sub get_user_details {
-    my ($self, $username) = @_;
-    if ( $self->{user} ) { 
-        debug "*** Found user: " . $self->{user}->{username};
-        return $self->{user};
-    } else {
-        debug "*** User not found: $username";
-        return;
     }
     
 }
@@ -161,7 +166,8 @@ Given a username, return a list of roles that user has.
 =cut
 
 sub get_user_roles {
-    return;
+    my @roles = ( 'sip2user' );
+    return \@roles;
 }
 
 =head2 _clean_sip2_reply
@@ -184,6 +190,48 @@ sub _clean_sip2_reply {
     
     return $s;
 
+}
+
+=head2 _sip2_indicates_valid_user
+
+Checks a message from SIP2 for signs ov a valid user. The message should contain both "BLY" and "CQY". 
+
+=cut
+
+sub _sip2_indicates_valid_user {
+
+    my ( $s ) = @_;
+
+    # BL - Check for a valid patron. BLY = valid, BLN = not valid
+    if ( $s =~ m/\|BLN/ ) {
+    
+        debug "*** Authentication failed: not a valid patron";
+        return;
+    
+    } elsif ( $s =~ m/\|BLY/ ) {
+    
+        # CQ - Valid patron password. CQY = valid, CQN = not valid
+        if ( $s =~ m/\|CQN/ ) {
+        
+            debug "*** Authentication failed: not a valid patron password";
+            return;
+        
+        } elsif ( $s =~ m/\|CQY/ ) {
+    
+            return 1;
+            
+        } else {
+        
+            die "Message from SIP2 does not contain neither CQY nor CQN. This should not happen! $s";
+        
+        }
+            
+    } else {
+    
+        die "Message from SIP2 does not contain neither BLY nor BLN. This should not happen! $s";
+    
+    }
+    
 }
 
 =head1 AUTHOR
