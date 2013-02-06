@@ -103,7 +103,7 @@ sub authenticate_user {
         
         } elsif ( $record =~ m/\|CQY/ ) {
     
-            my $user = { username => $username };
+            my $user = { username => $patron_username };
             
             ## Pick out interesting pieces from the record
             
