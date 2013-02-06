@@ -45,7 +45,7 @@ authenticated, or false if not.
 =cut
 
 sub authenticate_user {
-    my ($self, $patron_username, $paron_password) = @_;
+    my ($self, $patron_username, $patron_password) = @_;
     
     my $settings = $self->realm_settings;
     debug "*** Authenticating against: " . $settings->{host};
