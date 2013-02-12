@@ -52,11 +52,15 @@ sub authenticate_user {
     my $sc = SIP2::SC->new( $settings->{host} );
     
     # Attempt to log in to the SIP2 server
-    my $username = $settings->{username};
-    my $password = $settings->{password};
-    my $login_reply = $sc->message("9300CN$username|CO$password|");
-    $login_reply = _clean_sip2_reply( $login_reply );
-    debug "*** Login: " . $login_reply;
+    if ( $settings->{username} && $settings->{password} ) {
+        my $username = $settings->{username};
+        my $password = $settings->{password};
+        my $login_reply = $sc->message("9300CN$username|CO$password|");
+        $login_reply = _clean_sip2_reply( $login_reply );
+        debug "*** Login: " . $login_reply;
+    } else {
+        debug '*** Skipping login';
+    }
     
     ## Send the Patron Status Request
     
@@ -72,7 +76,13 @@ sub authenticate_user {
     # Patron identifier - variable length, required field
     my $patron = "AA$patron_username|";
     # Terminal password - variable length, required field
-    my $term = "AC$password|";
+    my $term;
+    if ( $settings->{password} ) {
+        my $password = $settings->{password};
+        $term = "AC$password|";
+    } else {
+        $term = "AC|";
+    }
     # Patron password - variable length, required field
     my $pass = "AD$patron_password|";
     
@@ -83,7 +93,7 @@ sub authenticate_user {
     $record = _clean_sip2_reply( $record );
     debug "*** Response from SIP2 server:" . $record;
     
-    return _sip2_indicates_valid_user( $record );    
+    return _sip2_indicates_valid_user( $record, $settings->{auth_denied} );    
     
 }
 
@@ -200,36 +210,56 @@ Checks a message from SIP2 for signs ov a valid user. The message should contain
 
 sub _sip2_indicates_valid_user {
 
-    my ( $s ) = @_;
+    my ( $s, $deny ) = @_;
 
-    # BL - Check for a valid patron. BLY = valid, BLN = not valid
-    if ( $s =~ m/\|BLN/ ) {
-    
-        debug "*** Authentication failed: not a valid patron";
-        return;
-    
-    } elsif ( $s =~ m/\|BLY/ ) {
-    
-        # CQ - Valid patron password. CQY = valid, CQN = not valid
-        if ( $s =~ m/\|CQN/ ) {
-        
-            debug "*** Authentication failed: not a valid patron password";
+    # We need different ways to check for valid users for different servers...
+    if ( $deny ) {
+
+        debug "*** Going to check the SIP2 response against the string '$deny'";
+
+        # Looks like at least the Norwegian Bibliofil ILS does not use BL/CQ in 
+        # the Patron Status reponse. It does however provide text in the AF field
+        # that we can match against:
+        # 24YY            01220130212    103410AO|AAn00196575|AE|AFL�nekortet ikke akseptert for utl�n p� automaten. Kontakt utl�nsskranken
+        # The part of the text we want to look for can be provided in the 
+        # auth_denied config variable:
+        #
+        #     lillevik:
+        #         provider: 'SIP2'
+        #         host: 127.0.0.1:1965
+        #         auth_denied: 'ikke akseptert'
+
+        if ( $s =~ m/$deny/ ) {
+            debug "*** Authentication failed: SIP2 response contains the string '$deny'";
             return;
-        
-        } elsif ( $s =~ m/\|CQY/ ) {
-    
-            return 1;
-            
         } else {
-        
-            die "Message from SIP2 does not contain neither CQY nor CQN. This should not happen! $s";
-        
+            # Success
+            return 1;
         }
-            
+
     } else {
-    
-        die "Message from SIP2 does not contain neither BLY nor BLN. This should not happen! $s";
-    
+
+        # This is the default check, using the BL and CQ fields
+
+        # BL - Check for a valid patron. BLY = valid, BLN = not valid
+        if ( $s =~ m/\|BLN/ ) {
+            debug "*** Authentication failed: not a valid patron";
+            return;
+        } elsif ( $s =~ m/\|BLY/ ) {
+            # CQ - Valid patron password. CQY = valid, CQN = not valid
+            if ( $s =~ m/\|CQN/ ) {
+                debug "*** Authentication failed: not a valid patron password";
+                return;
+            } elsif ( $s =~ m/\|CQY/ ) {
+                # Success
+                return 1;
+            } else {
+                die "Message from SIP2 does not contain neither CQY nor CQN. This should not happen! $s";
+            }
+        } else {
+            die "Message from SIP2 does not contain neither BLY nor BLN. This should not happen! $s";
+        }
+        
     }
     
 }
